@@ -1,29 +1,37 @@
-FROM elventear/supervisord:latest
+FROM alpine
+MAINTAINER siqi "masiqi@gmail.com"
 
-MAINTAINER Pepe Barbe <dev@antropoide.net>
+# Install transmission and dumb-init
+ADD files/repositories /etc/apk/repositories
+RUN apk add -U transmission-cli transmission-daemon && \
+    wget -O /usr/local/bin/dumb-init \
+        https://github.com/Yelp/dumb-init/releases/download/v1.0.0/dumb-init_1.0.0_amd64 && \
+    chmod +x /usr/local/bin/dumb-init
 
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y software-properties-common 
+# Copy the files to the image
+ADD ./files/ /tmp/
 
-RUN add-apt-repository -y ppa:transmissionbt/ppa && \
-    apt-get update && \
-    apt-get install -y transmission-daemon
+# Run the actual build:
+#   1. Copy the config file into place
+#   2. Copy the run script into place
+#   3. Remove all remaining build files and clean our apk cache
+RUN mkdir -p /etc/transmission && \
+    mkdir -p /opt/transmission/incomplete && \
+    mkdir -p /opt/transmission/downloads && \
+    sed \
+        -e 's|@ROOT_DIR@|/opt/transmission|g' \
+        /tmp/settings.json > /etc/transmission/settings.json && \
+    mv /tmp/run-transmission.sh /run-transmission.sh && \
+    chown -R transmission:transmission /opt/transmission && \
+    chown -R transmission:transmission /etc/transmission && \
+    rm -rf /tmp/* /var/cache/apk/*
 
-ADD files/transmission-daemon /etc/transmission-daemon
-ADD files/run_transmission.sh /run_transmission.sh
+# Set up the volumes
+VOLUME ["/opt/transmission/downloads"]
+VOLUME ["/opt/transmission/incomplete"]
 
-RUN mkdir -p /var/lib/transmission-daemon/incomplete && \
-    mkdir -p /var/lib/transmission-daemon/downloads && \
-    chown -R debian-transmission: /var/lib/transmission-daemon && \
-    chown -R debian-transmission: /etc/transmission-daemon    
-
-VOLUME ["/var/lib/transmission-daemon/downloads"]
-VOLUME ["/var/lib/transmission-daemon/incomplete"]
-
+# Expose our RPC and bind ports
 EXPOSE 9091
-EXPOSE 12345
+EXPOSE 51413
 
-USER debian-transmission
-
-CMD ["/run_transmission.sh"]
+CMD ["/usr/local/bin/dumb-init", "/run-transmission.sh"]
